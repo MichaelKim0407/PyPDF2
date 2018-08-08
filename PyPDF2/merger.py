@@ -76,6 +76,23 @@ class PdfFileMerger(object):
         self.id_count = 0
         self.strict = strict
 
+    @staticmethod
+    def get_pages(pdfr, pages):
+        if isinstance(pages, list):
+            return pages
+
+        if pages is None:
+            pages = slice(None)
+        elif isinstance(pages, slice):
+            pass
+        elif isinstance(pages, tuple):
+            pages = slice(*pages)
+        elif isinstance(pages, PageRange):
+            pages = pages.to_slice()
+        else:
+            raise TypeError
+        return range(pdfr.getNumPages())[pages]
+
     def merge(self, position, fileobj, bookmark=None, pages=None, import_bookmarks=True):
         """
         Merges the pages from the given file into the output file at the
@@ -135,14 +152,7 @@ class PdfFileMerger(object):
             pdfr._decryption_key = decryption_key
 
         # Find the range of pages to merge.
-        if pages is None:
-            pages = (0, pdfr.getNumPages())
-        elif isinstance(pages, PageRange):
-            pages = pages.indices(pdfr.getNumPages())
-        elif isinstance(pages, tuple):
-            pass
-        else:
-            raise TypeError('"pages" must be a tuple of (start, stop[, step])')
+        pages = self.get_pages(pdfr, pages)
 
         srcpages = []
         if bookmark:
@@ -163,7 +173,7 @@ class PdfFileMerger(object):
         self.named_dests += dests
 
         # Gather all the pages that are going to be merged
-        for i in range(*pages):
+        for i in pages:
             pg = pdfr.getPage(i)
 
             id = self.id_count
@@ -298,7 +308,7 @@ class PdfFileMerger(object):
         new_dests = []
         prev_header_added = True
         for k, o in list(dests.items()):
-            for j in range(*pages):
+            for j in pages:
                 if pdf.getPage(j).getObject() == o['/Page'].getObject():
                     o[NameObject('/Page')] = o['/Page'].getObject()
                     assert str_(k) == str_(o['/Title'])
@@ -322,7 +332,7 @@ class PdfFileMerger(object):
                     new_outline.append(sub)
             else:
                 prev_header_added = False
-                for j in range(*pages):
+                for j in pages:
                     if pdf.getPage(j).getObject() == o['/Page'].getObject():
                         o[NameObject('/Page')] = o['/Page'].getObject()
                         new_outline.append(o)
