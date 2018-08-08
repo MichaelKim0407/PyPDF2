@@ -135,11 +135,13 @@ class PdfFileMerger(object):
             pdfr._decryption_key = decryption_key
 
         # Find the range of pages to merge.
-        if pages == None:
+        if pages is None:
             pages = (0, pdfr.getNumPages())
         elif isinstance(pages, PageRange):
             pages = pages.indices(pdfr.getNumPages())
-        elif not isinstance(pages, tuple):
+        elif isinstance(pages, tuple):
+            pass
+        else:
             raise TypeError('"pages" must be a tuple of (start, stop[, step])')
 
         srcpages = []
