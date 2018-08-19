@@ -156,12 +156,16 @@ class PdfFileMerger(object):
 
         srcpages = []
         if bookmark:
-            bookmark = Bookmark(TextStringObject(bookmark), NumberObject(self.id_count), NameObject('/Fit'))
+            bookmark = Bookmark(
+                TextStringObject(bookmark),
+                NumberObject(self.id_count),
+                NameObject('/Fit')
+            )
 
         outline = []
         if import_bookmarks:
             outline = pdfr.getOutlines()
-            outline = self._trim_outline(pdfr, outline, pages)
+            outline = list(self._trim_outline(pdfr, outline, pages))
 
         if bookmark:
             self.bookmarks += [bookmark, outline]
@@ -169,7 +173,7 @@ class PdfFileMerger(object):
             self.bookmarks += outline
 
         dests = pdfr.namedDestinations
-        dests = self._trim_dests(pdfr, dests, pages)
+        dests = list(self._trim_dests(pdfr, dests, pages))
         self.named_dests += dests
 
         # Gather all the pages that are going to be merged
@@ -305,130 +309,156 @@ class PdfFileMerger(object):
         Removes any named destinations that are not a part of the specified
         page set.
         """
-        new_dests = []
-        prev_header_added = True
         for k, o in list(dests.items()):
+            o_page_object = o['/Page'].getObject()
             for j in pages:
-                if pdf.getPage(j).getObject() == o['/Page'].getObject():
-                    o[NameObject('/Page')] = o['/Page'].getObject()
-                    assert str_(k) == str_(o['/Title'])
-                    new_dests.append(o)
-                    break
-        return new_dests
+                pdf_page_object = pdf.getPage(j).getObject()
+                if isinstance(o_page_object, int):
+                    if j != o_page_object:
+                        continue
+                else:
+                    if pdf_page_object != o_page_object:
+                        continue
+                o[NameObject('/Page')] = pdf_page_object
+                assert str_(k) == str_(o['/Title'])
+                yield o
+                break
 
     def _trim_outline(self, pdf, outline, pages):
         """
         Removes any outline/bookmark entries that are not a part of the
         specified page set.
         """
-        new_outline = []
         prev_header_added = True
         for i, o in enumerate(outline):
             if isinstance(o, list):
-                sub = self._trim_outline(pdf, o, pages)
-                if sub:
-                    if not prev_header_added:
-                        new_outline.append(outline[i-1])
-                    new_outline.append(sub)
-            else:
-                prev_header_added = False
-                for j in pages:
-                    if pdf.getPage(j).getObject() == o['/Page'].getObject():
-                        o[NameObject('/Page')] = o['/Page'].getObject()
-                        new_outline.append(o)
-                        prev_header_added = True
-                        break
-        return new_outline
+                sub = list(self._trim_outline(pdf, o, pages))
+                if not sub:
+                    continue
+                if not prev_header_added:
+                    yield outline[i-1]
+                yield sub
+                continue
+
+            prev_header_added = False
+            o_page_object = o['/Page'].getObject()
+            for j in pages:
+                pdf_page_object = pdf.getPage(j).getObject()
+                if isinstance(o_page_object, int):
+                    if j != o_page_object:
+                        continue
+                else:
+                    if pdf_page_object != o_page_object:
+                        continue
+                o[NameObject('/Page')] = pdf_page_object
+                yield o
+                prev_header_added = True
+                break
 
     def _write_dests(self):
         dests = self.named_dests
 
         for v in dests:
+            if '/Page' not in v:
+                continue
+
+            v_page = v['/Page']
             pageno = None
-            pdf = None
-            if '/Page' in v:
-                for i, p in enumerate(self.pages):
-                    if p.id == v['/Page']:
-                        v[NameObject('/Page')] = p.out_pagedata
-                        pageno = i
-                        pdf = p.src
-                        break
-            if pageno != None:
-                self.output.addNamedDestinationObject(v)
+            for i, p in enumerate(self.pages):
+                if p.id != v_page:
+                    continue
+
+                v[NameObject('/Page')] = p.out_pagedata
+                pageno = i
+                break
+
+            if pageno is None:
+                continue
+            self.output.addDestinationObject(v)
 
     def _write_bookmarks(self, bookmarks=None, parent=None):
-
-        if bookmarks == None:
+        if bookmarks is None:
             bookmarks = self.bookmarks
 
         last_added = None
+
         for b in bookmarks:
             if isinstance(b, list):
                 self._write_bookmarks(b, last_added)
                 continue
 
+            if '/Page' not in b:
+                continue
+
+            b_page = b['/Page']
+            b_type = b['/Type']
             pageno = None
-            pdf = None
-            if '/Page' in b:
-                for i, p in enumerate(self.pages):
-                    if p.id == b['/Page']:
-                        #b[NameObject('/Page')] = p.out_pagedata
-                        args = [NumberObject(p.id), NameObject(b['/Type'])]
-                        #nothing more to add
-                        #if b['/Type'] == '/Fit' or b['/Type'] == '/FitB'
-                        if b['/Type'] == '/FitH' or b['/Type'] == '/FitBH':
-                            if '/Top' in b and not isinstance(b['/Top'], NullObject):
-                                args.append(FloatObject(b['/Top']))
-                            else:
-                                args.append(FloatObject(0))
-                            del b['/Top']
-                        elif b['/Type'] == '/FitV' or b['/Type'] == '/FitBV':
-                            if '/Left' in b and not isinstance(b['/Left'], NullObject):
-                                args.append(FloatObject(b['/Left']))
-                            else:
-                                args.append(FloatObject(0))
-                            del b['/Left']
-                        elif b['/Type'] == '/XYZ':
-                            if '/Left' in b and not isinstance(b['/Left'], NullObject):
-                                args.append(FloatObject(b['/Left']))
-                            else:
-                                args.append(FloatObject(0))
-                            if '/Top' in b and not isinstance(b['/Top'], NullObject):
-                                args.append(FloatObject(b['/Top']))
-                            else:
-                                args.append(FloatObject(0))
-                            if '/Zoom' in b and not isinstance(b['/Zoom'], NullObject):
-                                args.append(FloatObject(b['/Zoom']))
-                            else:
-                                args.append(FloatObject(0))
-                            del b['/Top'], b['/Zoom'], b['/Left']
-                        elif b['/Type'] == '/FitR':
-                            if '/Left' in b and not isinstance(b['/Left'], NullObject):
-                                args.append(FloatObject(b['/Left']))
-                            else:
-                                args.append(FloatObject(0))
-                            if '/Bottom' in b and not isinstance(b['/Bottom'], NullObject):
-                                args.append(FloatObject(b['/Bottom']))
-                            else:
-                                args.append(FloatObject(0))
-                            if '/Right' in b and not isinstance(b['/Right'], NullObject):
-                                args.append(FloatObject(b['/Right']))
-                            else:
-                                args.append(FloatObject(0))
-                            if '/Top' in b and not isinstance(b['/Top'], NullObject):
-                                args.append(FloatObject(b['/Top']))
-                            else:
-                                args.append(FloatObject(0))
-                            del b['/Left'], b['/Right'], b['/Bottom'], b['/Top']
+            for i, p in enumerate(self.pages):
+                if p.id != b_page:
+                    continue
 
-                        b[NameObject('/A')] = DictionaryObject({NameObject('/S'): NameObject('/GoTo'), NameObject('/D'): ArrayObject(args)})
+                args = [NumberObject(p.id), NameObject(b_type)]
 
-                        pageno = i
-                        pdf = p.src
-                        break
-            if pageno != None:
-                del b['/Page'], b['/Type']
-                last_added = self.output.addBookmarkDict(b, parent)
+                if b_type in ['/FitH', '/FitBH']:
+                    if '/Top' in b and not isinstance(b['/Top'], NullObject):
+                        args.append(FloatObject(b['/Top']))
+                    else:
+                        args.append(FloatObject(0))
+                    del b['/Top']
+
+                elif b_type in ['/FitV', 'FitBV']:
+                    if '/Left' in b and not isinstance(b['/Left'], NullObject):
+                        args.append(FloatObject(b['/Left']))
+                    else:
+                        args.append(FloatObject(0))
+                    del b['/Left']
+
+                elif b_type == '/XYZ':
+                    if '/Left' in b and not isinstance(b['/Left'], NullObject):
+                        args.append(FloatObject(b['/Left']))
+                    else:
+                        args.append(FloatObject(0))
+                    if '/Top' in b and not isinstance(b['/Top'], NullObject):
+                        args.append(FloatObject(b['/Top']))
+                    else:
+                        args.append(FloatObject(0))
+                    if '/Zoom' in b and not isinstance(b['/Zoom'], NullObject):
+                        args.append(FloatObject(b['/Zoom']))
+                    else:
+                        args.append(FloatObject(0))
+                    del b['/Top'], b['/Zoom'], b['/Left']
+
+                elif b_type == '/FitR':
+                    if '/Left' in b and not isinstance(b['/Left'], NullObject):
+                        args.append(FloatObject(b['/Left']))
+                    else:
+                        args.append(FloatObject(0))
+                    if '/Bottom' in b and not isinstance(b['/Bottom'], NullObject):
+                        args.append(FloatObject(b['/Bottom']))
+                    else:
+                        args.append(FloatObject(0))
+                    if '/Right' in b and not isinstance(b['/Right'], NullObject):
+                        args.append(FloatObject(b['/Right']))
+                    else:
+                        args.append(FloatObject(0))
+                    if '/Top' in b and not isinstance(b['/Top'], NullObject):
+                        args.append(FloatObject(b['/Top']))
+                    else:
+                        args.append(FloatObject(0))
+                    del b['/Left'], b['/Right'], b['/Bottom'], b['/Top']
+
+                b[NameObject('/A')] = DictionaryObject({
+                    NameObject('/S'): NameObject('/GoTo'),
+                    NameObject('/D'): ArrayObject(args)
+                })
+
+                pageno = i
+                break
+
+            if pageno is None:
+                continue
+            del b['/Page'], b['/Type']
+            last_added = self.output.addBookmarkDict(b, parent)
 
     def _associate_dests_to_pages(self, pages):
         for nd in self.named_dests:

@@ -754,6 +754,19 @@ class PdfFileWriter(object):
 
         return bookmarkRef
 
+    def addDestinationObject(self, dest):
+        destRef = self._addObject(dest)
+
+        if '/Dests' not in self._root_object:
+            dests = DictionaryObject()
+            self._root_object[NameObject('/Dests')] = self._addObject(dests)
+        else:
+            dests = self._root_object['/Dests']
+
+        dests[dest['/Title']] = destRef
+
+        return destRef
+
     def addNamedDestinationObject(self, dest):
         destRef = self._addObject(dest)
 
@@ -1355,7 +1368,7 @@ class PdfFileReader(object):
             :class:`Destinations<PyPDF2.generic.Destination>`.
         :rtype: dict
         """
-        if retval == None:
+        if retval is None:
             retval = {}
             catalog = self.trailer["/Root"]
 
@@ -1367,24 +1380,26 @@ class PdfFileReader(object):
                 if "/Dests" in names:
                     tree = names['/Dests']
 
-        if tree == None:
+        if tree is None:
             return retval
 
-        if "/Kids" in tree:
-            # recurse down the tree
-            for kid in tree["/Kids"]:
-                self.getNamedDestinations(kid.getObject(), retval)
-
-        if "/Names" in tree:
-            names = tree["/Names"]
-            for i in range(0, len(names), 2):
-                key = names[i].getObject()
-                val = names[i+1].getObject()
-                if isinstance(val, DictionaryObject) and '/D' in val:
-                    val = val['/D']
-                dest = self._buildDestination(key, val)
-                if dest != None:
-                    retval[key] = dest
+        for name in tree:
+            if name == '/Kids':
+                # recurse down the tree
+                for kid in tree["/Kids"]:
+                    self.getNamedDestinations(kid.getObject(), retval)
+            elif name == '/Names':
+                names = tree["/Names"]
+                for i in range(0, len(names), 2):
+                    key = names[i].getObject()
+                    val = names[i+1].getObject()
+                    if isinstance(val, DictionaryObject) and '/D' in val:
+                        val = val['/D']
+                    dest = self._buildDestination(key, val)
+                    if dest != None:
+                        retval[key] = dest
+            else:
+                retval[name] = self._buildDestination(name, tree[name])
 
         return retval
 
@@ -1400,7 +1415,7 @@ class PdfFileReader(object):
 
         :return: a nested list of :class:`Destinations<PyPDF2.generic.Destination>`.
         """
-        if outlines == None:
+        if outlines is None:
             outlines = []
             catalog = self.trailer["/Root"]
 
@@ -1418,8 +1433,8 @@ class PdfFileReader(object):
                     node = lines["/First"]
             self._namedDests = self.getNamedDestinations()
 
-        if node == None:
-          return outlines
+        if node is None:
+            return outlines
 
         # see if there are any more outlines
         while True:
@@ -1493,14 +1508,14 @@ class PdfFileReader(object):
 
         if "/A" in node and "/Title" in node:
             # Action, section 8.5 (only type GoTo supported)
-            title  = node["/Title"]
+            title = node["/Title"]
             action = node["/A"]
             if action["/S"] == "/GoTo":
                 dest = action["/D"]
         elif "/Dest" in node and "/Title" in node:
             # Destination, section 8.2.1
             title = node["/Title"]
-            dest  = node["/Dest"]
+            dest = node["/Dest"]
 
         # if destination found, then create outline
         if dest:
@@ -1509,6 +1524,7 @@ class PdfFileReader(object):
             elif isString(dest) and dest in self._namedDests:
                 outline = self._namedDests[dest]
                 outline[NameObject("/Title")] = title
+                outline[NameObject('/Dest')] = dest
             elif isinstance(dest, NameObject):
                 pass
             else:
